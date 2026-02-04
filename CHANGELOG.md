@@ -10,6 +10,11 @@
 * Added the `web` and `node` targets to the `--experimental-reset-state-function` flag.
   [#4909](https://github.com/wasm-bindgen/wasm-bindgen/pull/4909)
 
+* Added non-standard `mode` option for `FileSystemFileHandle.createSyncAccessHandle()`.
+  Also improved WebIDL generator to track stability at the signature level, allowing
+  stable methods to have unstable overloads.
+  [#4928](https://github.com/wasm-bindgen/wasm-bindgen/issues/4928)
+
 * Added a panic message when a getter as more than one argument. 
   [#4936](https://github.com/wasm-bindgen/wasm-bindgen/pull/4936)
 
