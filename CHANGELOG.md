@@ -10,6 +10,13 @@
 * Added the `web` and `node` targets to the `--experimental-reset-state-function` flag.
   [#4909](https://github.com/wasm-bindgen/wasm-bindgen/pull/4909)
 
+* Added support for unstable WebIDL to override stable attribute types, allowing
+  corrected type signatures behind `web_sys_unstable_apis`. Applied to `MouseEvent`
+  coordinate attributes (`clientX`, `clientY`, `screenX`, `screenY`, `offsetX`,
+  `offsetY`, `pageX`, `pageY`) which now return `f64` instead of `i32` when
+  unstable APIs are enabled, per the CSSOM View spec draft.
+  [#4935](https://github.com/wasm-bindgen/wasm-bindgen/pull/4935)
+
 * Added non-standard `mode` option for `FileSystemFileHandle.createSyncAccessHandle()`.
   Also improved WebIDL generator to track stability at the signature level, allowing
   stable methods to have unstable overloads.
