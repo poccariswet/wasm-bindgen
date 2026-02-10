@@ -28,6 +28,9 @@
 * Added `CommandEvent` and `CommandEventInit` from the Invoker Commands API.
   [#4552](https://github.com/wasm-bindgen/wasm-bindgen/pull/4552)
 
+* Added `AbstractRange`, `StaticRange`, and `StaticRangeInit` interfaces.
+  [#4221](https://github.com/wasm-bindgen/wasm-bindgen/pull/4221)
+
 * Updated WebCodecs API to Working Draft 2026-01-29 and MediaRecorder API to 2025-04-17.
   Added `rotation` and `flip` to `VideoDecoderConfig`.
   [#4411](https://github.com/wasm-bindgen/wasm-bindgen/pull/4411)
