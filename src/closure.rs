@@ -53,240 +53,22 @@ extern "C" {
     fn _wbg_cb_unref(js: &JsClosure);
 }
 
-/// A handle to both a closure in Rust as well as JS closure which will invoke
-/// the Rust closure.
-///
-/// A `Closure` is the primary way that a `'static` lifetime closure is
-/// transferred from Rust to JS. `Closure` currently requires that the closures
-/// it's created with have the `'static` lifetime in Rust for soundness reasons.
-///
-/// This type is a "handle" in the sense that whenever it is dropped it will
-/// invalidate the JS closure that it refers to. Any usage of the closure in JS
-/// after the `Closure` has been dropped will raise an exception. It's then up
-/// to you to arrange for `Closure` to be properly deallocate at an appropriate
-/// location in your program.
-///
-/// The type parameter on `Closure` is the type of closure that this represents.
-/// Currently this can only be the `Fn` and `FnMut` traits with up to 7
-/// arguments (and an optional return value).
-///
-/// # Examples
-///
-/// Here are a number of examples of using `Closure`.
-///
-/// ## Using the `setInterval` API
-///
-/// Sample usage of `Closure` to invoke the `setInterval` API.
-///
-/// ```rust,no_run
-/// use wasm_bindgen::prelude::*;
-///
-/// #[wasm_bindgen]
-/// extern "C" {
-///     fn setInterval(closure: &Closure<dyn FnMut()>, time: u32) -> i32;
-///     fn clearInterval(id: i32);
-///
-///     #[wasm_bindgen(js_namespace = console)]
-///     fn log(s: &str);
-/// }
-///
-/// #[wasm_bindgen]
-/// pub struct IntervalHandle {
-///     interval_id: i32,
-///     _closure: Closure<dyn FnMut()>,
-/// }
-///
-/// impl Drop for IntervalHandle {
-///     fn drop(&mut self) {
-///         clearInterval(self.interval_id);
-///     }
-/// }
-///
-/// #[wasm_bindgen]
-/// pub fn run() -> IntervalHandle {
-///     // First up we use `Closure::new` to wrap up a Rust closure and create
-///     // a JS closure.
-///     let cb = Closure::new(|| {
-///         log("interval elapsed!");
-///     });
-///
-///     // Next we pass this via reference to the `setInterval` function, and
-///     // `setInterval` gets a handle to the corresponding JS closure.
-///     let interval_id = setInterval(&cb, 1_000);
-///
-///     // If we were to drop `cb` here it would cause an exception to be raised
-///     // whenever the interval elapses. Instead we *return* our handle back to JS
-///     // so JS can decide when to cancel the interval and deallocate the closure.
-///     IntervalHandle {
-///         interval_id,
-///         _closure: cb,
-///     }
-/// }
-/// ```
-///
-/// ## Casting a `Closure` to a `js_sys::Function`
-///
-/// This is the same `setInterval` example as above, except it is using
-/// `web_sys` (which uses `js_sys::Function` for callbacks) instead of manually
-/// writing bindings to `setInterval` and other Web APIs.
-///
-/// ```rust,ignore
-/// use wasm_bindgen::JsCast;
-///
-/// #[wasm_bindgen]
-/// pub struct IntervalHandle {
-///     interval_id: i32,
-///     _closure: Closure<dyn FnMut()>,
-/// }
-///
-/// impl Drop for IntervalHandle {
-///     fn drop(&mut self) {
-///         let window = web_sys::window().unwrap();
-///         window.clear_interval_with_handle(self.interval_id);
-///     }
-/// }
-///
-/// #[wasm_bindgen]
-/// pub fn run() -> Result<IntervalHandle, JsValue> {
-///     let cb = Closure::new(|| {
-///         web_sys::console::log_1(&"interval elapsed!".into());
-///     });
-///
-///     let window = web_sys::window().unwrap();
-///     let interval_id = window.set_interval_with_callback_and_timeout_and_arguments_0(
-///         // Note this method call, which uses `as_ref()` to get a `JsValue`
-///         // from our `Closure` which is then converted to a `&Function`
-///         // using the `JsCast::unchecked_ref` function.
-///         cb.as_ref().unchecked_ref(),
-///         1_000,
-///     )?;
-///
-///     // Same as above.
-///     Ok(IntervalHandle {
-///         interval_id,
-///         _closure: cb,
-///     })
-/// }
-/// ```
-///
-/// ## Using `FnOnce` and `Closure::once` with `requestAnimationFrame`
-///
-/// Because `requestAnimationFrame` only calls its callback once, we can use
-/// `FnOnce` and `Closure::once` with it.
-///
-/// ```rust,no_run
-/// use wasm_bindgen::prelude::*;
-///
-/// #[wasm_bindgen]
-/// extern "C" {
-///     fn requestAnimationFrame(closure: &Closure<dyn FnMut()>) -> u32;
-///     fn cancelAnimationFrame(id: u32);
-///
-///     #[wasm_bindgen(js_namespace = console)]
-///     fn log(s: &str);
-/// }
-///
-/// #[wasm_bindgen]
-/// pub struct AnimationFrameHandle {
-///     animation_id: u32,
-///     _closure: Closure<dyn FnMut()>,
-/// }
-///
-/// impl Drop for AnimationFrameHandle {
-///     fn drop(&mut self) {
-///         cancelAnimationFrame(self.animation_id);
-///     }
-/// }
-///
-/// // A type that will log a message when it is dropped.
-/// struct LogOnDrop(&'static str);
-/// impl Drop for LogOnDrop {
-///     fn drop(&mut self) {
-///         log(self.0);
-///     }
-/// }
-///
-/// #[wasm_bindgen]
-/// pub fn run() -> AnimationFrameHandle {
-///     // We are using `Closure::once` which takes a `FnOnce`, so the function
-///     // can drop and/or move things that it closes over.
-///     let fired = LogOnDrop("animation frame fired or canceled");
-///     let cb = Closure::once(move || drop(fired));
-///
-///     // Schedule the animation frame!
-///     let animation_id = requestAnimationFrame(&cb);
-///
-///     // Again, return a handle to JS, so that the closure is not dropped
-///     // immediately and JS can decide whether to cancel the animation frame.
-///     AnimationFrameHandle {
-///         animation_id,
-///         _closure: cb,
-///     }
-/// }
-/// ```
-///
-/// ## Converting `FnOnce`s directly into JavaScript Functions with `Closure::once_into_js`
-///
-/// If we don't want to allow a `FnOnce` to be eagerly dropped (maybe because we
-/// just want it to drop after it is called and don't care about cancellation)
-/// then we can use the `Closure::once_into_js` function.
-///
-/// This is the same `requestAnimationFrame` example as above, but without
-/// supporting early cancellation.
-///
-/// ```
-/// use wasm_bindgen::prelude::*;
-///
-/// #[wasm_bindgen]
-/// extern "C" {
-///     // We modify the binding to take an untyped `JsValue` since that is what
-///     // is returned by `Closure::once_into_js`.
-///     //
-///     // If we were using the `web_sys` binding for `requestAnimationFrame`,
-///     // then the call sites would cast the `JsValue` into a `&js_sys::Function`
-///     // using `f.unchecked_ref::<js_sys::Function>()`. See the `web_sys`
-///     // example above for details.
-///     fn requestAnimationFrame(callback: JsValue);
-///
-///     #[wasm_bindgen(js_namespace = console)]
-///     fn log(s: &str);
-/// }
-///
-/// // A type that will log a message when it is dropped.
-/// struct LogOnDrop(&'static str);
-/// impl Drop for LogOnDrop {
-///     fn drop(&mut self) {
-///         log(self.0);
-///     }
-/// }
-///
-/// #[wasm_bindgen]
-/// pub fn run() {
-///     // We are using `Closure::once_into_js` which takes a `FnOnce` and
-///     // converts it into a JavaScript function, which is returned as a
-///     // `JsValue`.
-///     let fired = LogOnDrop("animation frame fired");
-///     let cb = Closure::once_into_js(move || drop(fired));
-///
-///     // Schedule the animation frame!
-///     requestAnimationFrame(cb);
-///
-///     // No need to worry about whether or not we drop a `Closure`
-///     // here or return some sort of handle to JS!
-/// }
-/// ```
 /// A closure with a lifetime parameter that represents a Rust closure passed to JavaScript.
 ///
 /// `ScopedClosure<'a, T>` is the unified closure type. The lifetime `'a` indicates
 /// how long the closure is valid:
 ///
-/// - **`ScopedClosure<'static, T>`** (aka [`StaticClosure<T>`] or [`Closure<T>`]) - An owned
-///   closure with heap-allocated data. Requires `'static` captures. Use for long-lived
-///   closures like event listeners and timers. Created with [`Closure::new`] or [`ScopedClosure::own`].
+/// - **`ScopedClosure<'static, T>`** - An owned closure with heap-allocated data. Requires
+///   `'static` captures. Use for long-lived closures like event listeners and timers.
+///   Created with [`Closure::new`] or [`ScopedClosure::own`]. May transfer ownership to the
+///   JS GC using finalizers.
 ///
 /// - **`ScopedClosure<'a, T>`** (non-`'static`) - A borrowed closure referencing stack data.
 ///   Allows non-`'static` captures. Use for immediate/synchronous callbacks. Created with
-///   [`ScopedClosure::borrow`] or [`ScopedClosure::borrow_mut`].
+///   [`ScopedClosure::borrow`] or [`ScopedClosure::borrow_mut`]. Cannot transfer ownership
+///   to JS GC.
+///
+/// [`Closure<T>`] and [`StaticClosure<T>`] are both type aliases for `ScopedClosure<'static, T>`.
 ///
 /// # Ownership Model
 ///
@@ -357,17 +139,17 @@ extern "C" {
 ///
 /// ## Transferring ownership to JS
 ///
-/// Pass a `Closure` by value to transfer ownership:
+/// Pass a `StaticClosure` (`ScopedClosure<'static, T>``) by value to transfer ownership:
 ///
 /// ```ignore
 /// use wasm_bindgen::prelude::*;
 ///
 /// #[wasm_bindgen]
 /// extern "C" {
-///     fn set_one_shot_callback(cb: Closure<dyn FnMut()>);
+///     fn set_one_shot_callback(cb: StaticClosure<dyn FnMut()>);
 /// }
 ///
-/// let cb = Closure::new(|| { /* ... */ });
+/// let cb = StaticClosure::new(|| { /* ... */ });
 /// set_one_shot_callback(cb);  // Ownership transferred, no need to store
 /// ```
 pub struct ScopedClosure<'a, T: ?Sized> {
@@ -859,6 +641,163 @@ where
     }
 }
 
+/// A closure wrapper for immediate/synchronous callbacks.
+///
+/// `ImmediateClosure` wraps a borrowed closure for use in synchronous JS callbacks
+/// like `Array.forEach`, `Array.map`, etc. The JS side receives the closure,
+/// calls it immediately, and discards it - no GC tracking is needed.
+///
+/// Panics are caught and converted to JavaScript exceptions (when built with
+/// `panic=unwind`). No `UnwindSafe` bounds are required - the closure is wrapped
+/// internally.
+///
+/// # Choosing Between Closure Types
+///
+/// | Type | Use Case | Lifetime |
+/// |------|----------|----------|
+/// | `ImmediateClosure` | Synchronous callbacks (forEach, map) | Borrowed, immediate |
+/// | `ScopedClosure::borrow[_mut]` | Callbacks JS may store within scope | Borrowed, scoped |
+/// | `Closure::new` | Long-lived callbacks (events, timers) | `'static` |
+///
+/// # Example
+///
+/// ```ignore
+/// use wasm_bindgen::prelude::*;
+///
+/// #[wasm_bindgen]
+/// extern "C" {
+///     fn forEach(cb: &ImmediateClosure<dyn FnMut(JsValue)>);
+/// }
+///
+/// let mut sum = 0;
+/// let closure = ImmediateClosure::new(&mut |val: JsValue| {
+///     sum += val.as_f64().unwrap() as i32;
+/// });
+/// forEach(&closure);
+/// // sum is now updated
+/// ```
+pub struct ImmediateClosure<'a, T: ?Sized> {
+    data: WasmSlice,
+    unwind_safe: bool,
+    _marker: PhantomData<&'a mut T>,
+}
+
+impl<'a, T: ?Sized + WasmClosure> ImmediateClosure<'a, T> {
+    /// Creates an immediate closure from a mutable borrow of a `FnMut` closure.
+    ///
+    /// This is the common case for closures that mutate captured state.
+    /// Panics are caught and converted to JS exceptions.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut count = 0;
+    /// let closure = ImmediateClosure::new(&mut || { count += 1; });
+    /// call_closure(&closure);
+    /// assert_eq!(count, 1);
+    /// ```
+    pub fn new<F>(f: &'a mut F) -> ImmediateClosure<'a, F::Static>
+    where
+        F: UnsizeClosureRefMut<T> + ?Sized,
+    {
+        let t: &mut T = f.unsize_closure_ref();
+        let (ptr, len): (u32, u32) = unsafe { mem::transmute_copy(&t) };
+        ImmediateClosure {
+            data: WasmSlice { ptr, len },
+            unwind_safe: true,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Creates an immediate closure from an immutable borrow of a `Fn` closure.
+    ///
+    /// Use this for closures that don't need to mutate captured state.
+    /// Panics are caught and converted to JS exceptions.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let data = vec![1, 2, 3];
+    /// let closure = ImmediateClosure::new_immutable(&|| {
+    ///     println!("data len: {}", data.len());
+    /// });
+    /// call_closure(&closure);
+    /// ```
+    pub fn new_immutable<F>(f: &'a F) -> ImmediateClosure<'a, F::Static>
+    where
+        F: UnsizeClosureRef<T> + ?Sized,
+    {
+        let t: &T = f.unsize_closure_ref();
+        let (ptr, len): (u32, u32) = unsafe { mem::transmute_copy(&t) };
+        ImmediateClosure {
+            data: WasmSlice { ptr, len },
+            unwind_safe: true,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Like [`new`](Self::new), but does not catch panics.
+    ///
+    /// If the closure panics, the process will abort. This variant is useful
+    /// when you want maximum performance and are certain the closure won't panic,
+    /// or when working with types that are not `UnwindSafe`.
+    pub fn new_aborting<F>(f: &'a mut F) -> ImmediateClosure<'a, F::Static>
+    where
+        F: UnsizeClosureRefMut<T> + ?Sized,
+    {
+        let t: &mut T = f.unsize_closure_ref();
+        let (ptr, len): (u32, u32) = unsafe { mem::transmute_copy(&t) };
+        ImmediateClosure {
+            data: WasmSlice { ptr, len },
+            unwind_safe: false,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Like [`new_immutable`](Self::new_immutable), but does not catch panics.
+    ///
+    /// If the closure panics, the process will abort.
+    pub fn new_immutable_aborting<F>(f: &'a F) -> ImmediateClosure<'a, F::Static>
+    where
+        F: UnsizeClosureRef<T> + ?Sized,
+    {
+        let t: &T = f.unsize_closure_ref();
+        let (ptr, len): (u32, u32) = unsafe { mem::transmute_copy(&t) };
+        ImmediateClosure {
+            data: WasmSlice { ptr, len },
+            unwind_safe: false,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<T: ?Sized> fmt::Debug for ImmediateClosure<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ImmediateClosure").finish_non_exhaustive()
+    }
+}
+
+impl<'a, T: ?Sized + WasmClosure> From<&'a ImmediateClosure<'a, T>> for ScopedClosure<'a, T> {
+    /// Converts an `ImmediateClosure` reference into a `ScopedClosure`.
+    ///
+    /// This allows passing an `ImmediateClosure` where a `ScopedClosure` is expected,
+    /// enabling gradual migration of APIs from `ImmediateClosure` to `ScopedClosure`.
+    ///
+    /// Note that this conversion has overhead compared to using `ImmediateClosure`
+    /// directly, as it creates a JS wrapper object.
+    fn from(immediate: &'a ImmediateClosure<'a, T>) -> Self {
+        ScopedClosure {
+            js: crate::__rt::wbg_cast(BorrowedClosure::<T> {
+                data: immediate.data,
+                unwind_safe: immediate.unwind_safe,
+                _marker: PhantomData,
+            }),
+            _marker: PhantomData,
+            _lifetime: PhantomData,
+        }
+    }
+}
+
 /// A trait for converting an `FnOnce(A...) -> R` into a `FnMut(A...) -> R` that
 /// will throw if ever called more than once.
 #[doc(hidden)]
@@ -1073,20 +1012,67 @@ where
     }
 }
 
+impl<T> WasmDescribe for ImmediateClosure<'_, T>
+where
+    T: WasmClosure + ?Sized,
+{
+    #[cfg_attr(wasm_bindgen_unstable_test_coverage, coverage(off))]
+    fn describe() {
+        // Delegate to the underlying dyn Fn/FnMut - uses FUNCTION descriptor
+        <T as WasmDescribe>::describe();
+    }
+}
+
+impl<T> IntoWasmAbi for &ImmediateClosure<'_, T>
+where
+    T: WasmClosure + ?Sized,
+{
+    type Abi = WasmSlice;
+
+    fn into_abi(self) -> WasmSlice {
+        let WasmSlice { ptr, len } = self.data;
+        let len_with_flag = if self.unwind_safe {
+            len | 0x80000000
+        } else {
+            len
+        };
+        WasmSlice {
+            ptr,
+            len: len_with_flag,
+        }
+    }
+}
+
+impl<T> OptionIntoWasmAbi for &ImmediateClosure<'_, T>
+where
+    T: WasmClosure + ?Sized,
+{
+    fn none() -> WasmSlice {
+        WasmSlice { ptr: 0, len: 0 }
+    }
+}
+
 fn _check() {
     fn _assert<T: IntoWasmAbi>() {}
-    // By reference (any lifetime)
+    // ScopedClosure by reference (any lifetime)
     _assert::<&ScopedClosure<dyn Fn()>>();
     _assert::<&ScopedClosure<dyn Fn(String)>>();
     _assert::<&ScopedClosure<dyn Fn() -> String>>();
     _assert::<&ScopedClosure<dyn FnMut()>>();
     _assert::<&ScopedClosure<dyn FnMut(String)>>();
     _assert::<&ScopedClosure<dyn FnMut() -> String>>();
-    // By value (only 'static)
+    // ScopedClosure by value (only 'static)
     _assert::<ScopedClosure<'static, dyn Fn()>>();
     _assert::<ScopedClosure<'static, dyn FnMut()>>();
     _assert::<Closure<dyn Fn()>>();
     _assert::<Closure<dyn FnMut()>>();
+    // ImmediateClosure by reference
+    _assert::<&ImmediateClosure<dyn Fn()>>();
+    _assert::<&ImmediateClosure<dyn Fn(String)>>();
+    _assert::<&ImmediateClosure<dyn Fn() -> String>>();
+    _assert::<&ImmediateClosure<dyn FnMut()>>();
+    _assert::<&ImmediateClosure<dyn FnMut(String)>>();
+    _assert::<&ImmediateClosure<dyn FnMut() -> String>>();
 }
 
 impl<T> fmt::Debug for ScopedClosure<'_, T>
