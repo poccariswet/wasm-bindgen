@@ -90,14 +90,17 @@ test-web-idl *ARGS="":
 test-web-idl-tests *ARGS="":
     cargo test -p webidl-tests --target wasm32-unknown-unknown {{ARGS}}
 
+test-web-idl-tests-unstable *ARGS="":
+    RUSTFLAGS="--cfg=web_sys_unstable_apis" cargo test -p webidl-tests --target wasm32-unknown-unknown {{ARGS}}
+
 test-web-idl-tests-next *ARGS="":
     WBG_NEXT_UNSTABLE=1 RUSTFLAGS="--cfg=wbg_next_unstable --cfg=web_sys_unstable_apis" cargo test -p webidl-tests --target wasm32-unknown-unknown {{ARGS}}
 
 generate-web-sys:
-    RUST_LOG=warn cargo run --release --package wasm-bindgen-webidl -- crates/web-sys/webidls crates/web-sys/src/features
+    RUST_LOG=warn cargo run --release --package wasm-bindgen-webidl -- crates/web-sys/webidls crates/web-sys/src/features crates/web-sys/Cargo.toml
 
 generate-web-sys-next:
-    RUST_LOG=warn cargo run --release --package wasm-bindgen-webidl -- crates/web-sys/webidls crates/web-sys/src/features --next-unstable
+    RUST_LOG=warn cargo run --release --package wasm-bindgen-webidl -- crates/web-sys/webidls crates/web-sys/src/features --next-unstable crates/web-sys/Cargo.toml
 
 bench:
     cargo bench --target wasm32-unknown-unknown

@@ -561,6 +561,62 @@ global.SignatureStability = class {
   }
 };
 
+// Mixin override test classes
+global.ImageDataLike = class ImageDataLike {
+  constructor() {
+    this.data = [];
+  }
+};
+
+global.CanvasLike = class CanvasLike {
+  constructor() {}
+  
+  // putImageData accepts both f64 and i32 for dx/dy in JavaScript
+  putImageData(imageData, dx, dy) {
+    // Return the type of dx to verify which binding was used
+    return typeof dx === 'number' ? (Number.isInteger(dx) ? 'integer' : 'float') : 'unknown';
+  }
+};
+
+global.Position = class Position {
+  constructor() {}
+};
+
+global.GeolocationLike = class GeolocationLike {
+  constructor() {}
+  
+  getCurrentPosition(successCallback) {
+    // Just a stub
+  }
+};
+
+global.TextureLike = class TextureLike {
+  constructor() {}
+};
+
+global.UnstableFrame = class UnstableFrame {
+  constructor() {}
+};
+
+global.WebGLLike = class WebGLLike {
+  constructor() {}
+
+  texUpload(texture, arg1, arg2) {
+    if (typeof arg1 === 'number' && Number.isInteger(arg1)) return 'long';
+    if (typeof arg1 === 'number') return 'double';
+    if (typeof arg1 === 'string') return 'string';
+    return 'frame';
+  }
+};
+
+global.TestOptionalUnstableArg = class TestOptionalUnstableArg {
+  constructor() {}
+  
+  read(options) {
+    return Promise.resolve("data");
+  }
+};
+
 global.TestSingleIterable = class {
   constructor() {
     this.items = ['item0', 'item1', 'item2'];

@@ -458,6 +458,27 @@ pub struct InterfaceMethod<'a> {
     pub has_unstable_override: bool,
 }
 
+impl<'a> InterfaceMethod<'a> {
+    /// Returns true if this method has the same effective signature as `other`.
+    ///
+    /// Two methods have the same signature when they would produce the same Rust
+    /// binding: same JS name, same argument types, same return type, and same
+    /// throws behavior. Used for both deduplication (across operations) and
+    /// merge detection (stable/unstable gating).
+    pub fn same_signature(&self, other: &InterfaceMethod<'_>) -> bool {
+        self.js_name == other.js_name
+            && self.variadic == other.variadic
+            && self.variadic_type == other.variadic_type
+            && self.ret_wbg_ty == other.ret_wbg_ty
+            && self.catch == other.catch
+            && self
+                .arguments
+                .iter()
+                .map(|(_, wbg_ty)| wbg_ty)
+                .eq(other.arguments.iter().map(|(_, wbg_ty)| wbg_ty))
+    }
+}
+
 impl InterfaceMethod<'_> {
     pub(crate) fn generate(
         &self,
@@ -498,9 +519,13 @@ impl InterfaceMethod<'_> {
         } else {
             maybe_unstable_docs(*unstable)
         };
-        // In next_unstable mode, use generics (generics_compat=false)
-        // In compat mode, use legacy types (generics_compat=true)
-        let generics_compat = !options.next_unstable;
+        // Unstable APIs always use typed generics (generics_compat=false).
+        // Stable APIs use legacy types by default, typed generics if next_unstable is set.
+        let generics_compat = if *unstable {
+            false
+        } else {
+            !options.next_unstable.get()
+        };
 
         // Convert WbgType to syn::Type during code generation
         use crate::util::TypePosition;
@@ -1186,9 +1211,13 @@ impl Function<'_> {
             unstable,
         } = self;
 
-        // In next_unstable mode, use generics (generics_compat=false)
-        // In compat mode, use legacy types (generics_compat=true)
-        let generics_compat = !options.next_unstable;
+        // Unstable APIs always use typed generics (generics_compat=false).
+        // Stable APIs use legacy types by default, typed generics if next_unstable is set.
+        let generics_compat = if *unstable {
+            false
+        } else {
+            !options.next_unstable.get()
+        };
 
         // Convert WbgType to syn::Type during code generation
         use crate::util::TypePosition;
